@@ -1974,15 +1974,16 @@ function tickMain(){
       var gb = GRAB.b, pb = gb.pb, pt = pb.getWorldPoint(PL.Vec2(GRAB.lx, GRAB.ly)), gv = pb.getLinearVelocityFromWorldPoint(pt);
       var gm = pb.getMass();
       /* The further you pull the cursor away from the point you grabbed, the harder and faster it
-         pulls. Stiffness and damping scale together (damping is 2*sqrt(stiffness), and 0.45 already
-         was that at the old 0.05), so it stays a critically damped spring at every distance instead
-         of springing back and forth when you yank it far. At zero distance nothing changed. */
+         pulls, and there is no ceiling on that: drag it across the screen and it keeps getting
+         stronger. Damping is 2*sqrt(stiffness) (0.45 was already that value at the old 0.05), so it
+         stays a critically damped spring the whole way out instead of springing back and forth. */
       var gdx = mousePos.x - pt.x, gdy = mousePos.y - pt.y;
       var gd = Math.sqrt(gdx*gdx + gdy*gdy);
-      var gsc = 1 + gd/60; if (gsc > 6) gsc = 6;
-      var gdamp = Math.sqrt(gsc);
+      var gsc = 1 + gd/40, gdamp = Math.sqrt(gsc);
       var ax = 0.05*gsc*gdx - 0.45*gdamp*gv.x, ay = 0.05*gsc*gdy - 0.45*gdamp*gv.y;
-      var al = Math.sqrt(ax*ax + ay*ay), amax = 1.2*gsc; if (al > amax){ ax *= amax/al; ay *= amax/al; }
+      /* the acceleration ceiling rises with the distance too. It was pinned to the stiffening factor,
+         which flattened out around 300 px and is why a long drag stopped speeding up. */
+      var al = Math.sqrt(ax*ax + ay*ay), amax = 1.2 + gd*0.15; if (al > amax){ ax *= amax/al; ay *= amax/al; }
       pb.applyForce(PL.Vec2(gm*ax, gm*ay - gm*G*gb.gf*0.95), pt, true);
     }
     stepping = true;
