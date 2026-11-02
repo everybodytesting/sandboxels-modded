@@ -1972,8 +1972,17 @@ function tickMain(){
     for (i = 0; i < forces.length; i++) if (forces[i].F > 0) forces[i].b.pb.applyForce(PL.Vec2(0, -forces[i].F), PL.Vec2(forces[i].x, forces[i].y), true);
     if (GRAB && GRAB.b.pb && GRAB.b.pb.getType() === "dynamic"){
       var gb = GRAB.b, pb = gb.pb, pt = pb.getWorldPoint(PL.Vec2(GRAB.lx, GRAB.ly)), gv = pb.getLinearVelocityFromWorldPoint(pt);
-      var gm = pb.getMass(), ax = 0.05*(mousePos.x - pt.x) - 0.45*gv.x, ay = 0.05*(mousePos.y - pt.y) - 0.45*gv.y;
-      var al = Math.sqrt(ax*ax + ay*ay); if (al > 1.2){ ax *= 1.2/al; ay *= 1.2/al; }
+      var gm = pb.getMass();
+      /* The further you pull the cursor away from the point you grabbed, the harder and faster it
+         pulls. Stiffness and damping scale together (damping is 2*sqrt(stiffness), and 0.45 already
+         was that at the old 0.05), so it stays a critically damped spring at every distance instead
+         of springing back and forth when you yank it far. At zero distance nothing changed. */
+      var gdx = mousePos.x - pt.x, gdy = mousePos.y - pt.y;
+      var gd = Math.sqrt(gdx*gdx + gdy*gdy);
+      var gsc = 1 + gd/60; if (gsc > 6) gsc = 6;
+      var gdamp = Math.sqrt(gsc);
+      var ax = 0.05*gsc*gdx - 0.45*gdamp*gv.x, ay = 0.05*gsc*gdy - 0.45*gdamp*gv.y;
+      var al = Math.sqrt(ax*ax + ay*ay), amax = 1.2*gsc; if (al > amax){ ax *= amax/al; ay *= amax/al; }
       pb.applyForce(PL.Vec2(gm*ax, gm*ay - gm*G*gb.gf*0.95), pt, true);
     }
     stepping = true;
