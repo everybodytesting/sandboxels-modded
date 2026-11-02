@@ -416,6 +416,10 @@ function playableBounds(){
 function initWorld(){
   if (world || !PL) return;
   world = new PL.World({ gravity: PL.Vec2(0, G), allowSleep: true });   // resting objects stop costing anything
+  /* Planck clamps how far a body may travel in one step and maxTranslation defaults to 2.0 units.
+     With four sub-steps that is a hard ceiling of 8 px per tick however hard the grab pulls, which
+     is the wall the cursor hits when you drag something across the screen. Lift the ceiling. */
+  try { if (PL.Settings) PL.Settings.maxTranslation = 40; } catch(e){}
   terrain = world.createBody({ type: "static" });
   var B = playableBounds(), my = (B.y0 + B.y1)/2, mx = (B.x0 + B.x1)/2, bd = { friction: 0.8, userData: { t: 1, kind: 1, border: 1 } };
   terrain.createFixture(PL.Box(50, 2000, PL.Vec2(B.x0 - 0.5 - 50, my)), bd);
