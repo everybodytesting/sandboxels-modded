@@ -1,117 +1,29 @@
 /* ============================================================================
-   SUBLEVEL PHYSICS v18 -  Sandboxels 1.13.x  -  powered by Planck.js (Box2D)
+   SUBLEVEL PHYSICS v19 -  Sandboxels 1.13.x  -  powered by Planck.js (Box2D)
    LOAD THIS MOD LAST. Needs internet once per session (planck.js from a CDN).
 
-   v18 - THE clone fix. When a pixel became part of a body it was cleared out of the map and
-         flagged dead, but it was never taken out of Sandboxels' own currentPixels list. A dead
-         pixel that is still in that list gets ticked, and when its old cell is empty again it
-         writes itself back into the map: one pixel placed becomes two, then four, each new copy
-         another physics object. Every mod deletion now removes the pixel from currentPixels too
-         (batched once per pass), and a revived spare proxy is pushed back in.
-   v17 - coverage + leaks:
-         - the support scan no longer trusts the per-element "can this fall" guess for what
-           becomes a body. Anything solid that is not a grain (movable / powder behaviour),
-           not an anchor (wall / anchored / tool / energy) is now scanned and converted, so
-           solid blocks that used to be skipped as "does not fall" get physics too.
-         - relocate() no longer deletes a grain it cannot place (that was material vanishing)
-           and no longer clears a map slot it does not actually own (a stale position there
-           orphaned the real pixel, which then reappeared as a clone)
-         - joinPixel() refuses instead of eating a pixel whose cell is already taken
-         - proxy creation no longer fires the place hook, so a moving body cannot flood the
-           support queue with thousands of self-inflicted scans per tick (the lag)
-   v16 - nothing floats, guaranteed:
-         - a body that could not be built because the per-tick budget was spent is now
-           RE-QUEUED instead of being marked done (that budget was silently eating
-           conversions, which is why freshly placed floating solids just sat there)
-         - user edits are processed before the background sweep instead of after it, so a
-           shape you just placed is handled on the tick you place it
-         - a rolling full-map audit re-checks every falling pixel every ~8 s, so nothing can
-           stay airborne no matter which hook missed it
-         - anything that is not a solid state (liquid, gas, odd mod states) is explicitly
-           non-conductive in the support walk, and pixels already proven supported this tick
-           are skipped (this was also most of the post-load lag: every marked pixel kicked
-           off its own region walk)
-   v15 - no more creeping spin in sand. the support/buoyancy force was applied at the fluid
-         contact centroid, which sits off the body's centre whenever sand touches one side
-         more than the other: a permanent off-centre force = permanent torque = it slowly
-         rotates forever. In powder the force is now applied through the centre of mass
-         (zero lever arm), angular damping in powder is stronger, and a body only latches
-         "settled" when it has stopped turning too.
-   v14 - fixes the v12/v13 regressions:
-         - sprite rendering REMOVED: element renderers baked into an offscreen canvas at a
-           fixed scale is what made bodies look shaded/broken. Pixels draw live again.
-         - proxy placement can no longer write into an occupied cell. When a grain could not
-           be shoved aside, createPixel() was called on top of it: the old pixel got orphaned
-           (kept ticking, re-appeared elsewhere = "it clones itself") and the next bookkeeping
-           pass wiped the slot (= "it randomly deletes"). Both are gone.
-         - body creation from a support scan is budgeted per tick, so a save loading with many
-           free chunks cannot spend the whole frame building bodies
-   v13 - body creation made unconditional instead of "try it and put it back":
-         - no velocity clamp (bodies were never actually launched off-screen)
-         - every pixelMap touch in proxy placement is bounds-checked, which was the real
-           reason a body spawned near the map edge could abort half-way through and leave
-           cells without proxies. Creation now cannot throw and cannot lose the shape.
-   v12 - FPS pass for big/awkward shapes (one complex body used to tank the frame):
-         - colliders per body are budgeted (row runs, else coarse blocks) so a gnarly
-           shape cannot spawn thousands of fixtures
-         - proxy scans (fluid, powder drag, grain shove, rider walk) are sampled, not
-           full-map walks; the grain-shove probe no longer builds a huge temp array and
-           no longer asks Planck for the mass once per grain
-         - terrain refresh is throttled and cached per body (a resting body reuses its
-           fixtures instead of rescanning its footprint every tick)
-         - bodies are drawn from a cached sprite canvas instead of one fillRect per cell
-           per frame
-         - linear/angular velocity is clamped, and a body that fails to build puts its
-           pixels back instead of half-deleting the shape
-   v11 - support detection rewritten to match the rule "stable only if TOUCHING pixels lead
-         to the world wall or an anchored block":
-         - the old 4000-pixel bail-out that declared any big floating chunk "supported" is
-           gone (that is why moon-save chunks hung in the air)
-         - unknown elements no longer count as support
-         - a full-map support sweep runs after a load/reset (and on the first ticks after
-           boot), spread over ticks with a node budget, so a loaded save is not left with
-           every solid frozen in place; live edits still use the incremental dirty queue
-   v10 - powder drag instead of the sink limiter. Solids falling into sand/gravel
-         now lose speed to DRAG that scales with the number of grains UNDER the
-         body (nothing above it counts, so cups full of sand are untouched), and
-         once the speed drops to a crawl for a few ticks the body SETTLES where it
-         is and the grains hold it up (gravity cancelled) instead of creeping down
-         forever. Fast/heavy bodies punch in deep, light ones stop on top. Dug out
-         from under it, or hit by a tool/other body, it starts moving again.
-         rock_wall is whitelisted to get physics (it is a tool element, so the
-         normal test used to skip it).
-   v9  - sand/solid interaction MERGED BACK FROM v5. v7/v8 turned every powder
-         surface into a real (non-sensor) collider so solids stopped sinking into
-         sand; that made sand feel like concrete. This version keeps the v6-v8
-         work (physgrab, riders, support check, editor remap, animated colours)
-         but the powder interaction is the v5 one again:
-         - powders stay SOFT sensors, so bodies move through them in any direction
-         - the v5 pre-step scan shoves and FLINGS grains aside with real velocity
-           (grains on top of a body ride along, cups still carry sand)
-         - v5 impulse-vs-resistance powder push restored (heavy/fast wins, a light
-           body just sits on top)
-         - the v8 depth-limited "sink 5 px then act like ground" limiter and the
-           v8 impact splash are removed (they were the unnatural part)
-   v6 (written against the real 1.13 source: mouse1Action / mouse2Action /
-   drawCursor / lineCoords / erase tool)
-   - Powder lying on a body rides along with it (cups carry sand, you can lift
-     a pile, kicking never drops grains through the bottom).
-   - Support check: only things connected (through solids/powders) to the world
-     edge or an anchored block are "grounded". Powder/liquid islands, rings
-     filled with sand etc. no longer hold solids up.
-   - Placing/erasing on a physics body works IN THE BODY'S OWN GRID (no holes,
-     no splitting). The brush cursor is drawn rotated, every frame.
-   - Every non-self-moving material gets physics (tick-only solids such as
-     "border", sturdy/support solids, plants, etc). Animated colours/alpha are
-     copied from the footprint each tick.
-   - New tool: physgrab (click a physics body and drag it around).
-   - Lag: fewer support scans, no per-pixel re-sync, throttled terrain refresh.
+   v19 - performance pass (same gameplay, much cheaper per tick):
+         - the currentPixels cleanup ran once per body per tick and walked the whole pixel list each
+           time. It now runs ONCE per tick (and immediately only for edits made between ticks).
+         - moving sand no longer counts as a "change": it used to dirty the terrain and wake the
+           support scan for every grain that moved anywhere on the map.
+         - powder colliders are only built for bodies that are actually moving fast (slow bodies in
+           sand never touched them anyway), and the dead post-solve handler is gone.
+         - cheaper solver (3 substeps, 4 velocity iterations), fewer colliders per body, smaller
+           proxy samples, grain-push probe only looks in the direction of travel and skips settled
+           bodies, terrain refresh skipped while nothing moves, fluid scan throttled harder,
+           animation scratch pixel reused instead of allocated per call, animated bodies rebuild
+           every 2nd tick instead of every tick, safety-net sweeps made rarer.
+   v18 - the clone fix (dead pixels are removed from currentPixels).
+   Older notes (v6-v17): support detection through static solids only, powder drag + settle,
+   riders, local-grid editing, rotated cursor, fault-line shattering, animated materials, gravity
+   setting, full-map support sweep.
    Tools: physgrab, physkick, physicsspin, physicsflip, physicsfreeze,
           physicsunfreeze, physicssnap, physicsalignedsnap
    ========================================================================== */
 (function () {
 
-var G = 0.09, HOLD = 12, SUB = 4, DT = 1/SUB;
+var G = 0.09, HOLD = 12, SUB = 3, DT = 1/SUB;
 var GRAV_ON = 1, GRAV_SET = -1;   // physics gravity switch, driven by the Gravity setting
 var GRAV_SETTING = "sl_gravity";
 var PDRAG = 0.85, SETTLE_SP = 0.22, SETTLE_N = 8;   // powder drag strength, settle speed, quiet ticks before it settles
@@ -120,12 +32,12 @@ var tfix = new Map(), impacts = [], pushes = [], RIDERS = new Set(), GC = new Se
 var baseId = Math.floor(Math.random()*1e8) * 100, idc = 1;
 var NOJOIN = false, ERASEGUARD = false, dirtyA = [], dirtyS = new Set(), hookedCount = 0;
 var sweepQ = null, sweepChecked = null, scanNodes = 0, sweepAt = 2, sweepTries = 0;   // full-map support sweep state
-var MAXFIX = 260;              // collider budget per body
-var PROXYCAP = 400;            // proxies looked at per body per scan
+var MAXFIX = 140;              // collider budget per body
+var PROXYCAP = 150;            // proxies looked at per body per scan
 var bodyBudget = 6;            // new bodies allowed per tick (keeps a save load smooth)
 var TE = 0, TERRAIN_DIRTY = 0; // terrain refresh epoch / dirty flag
+var INTICK = false;            // true while the per-tick hook runs: pixel-list cleanup is deferred to its end
 /* evenly-sampled proxies: cost of a scan no longer grows with body size */
-var SMP_SCRATCH = [];
 function sampleProxies(b, cap, out){
   out = out || [];
   out.length = 0;
@@ -161,6 +73,14 @@ function wakeAt(x, y){
       var wb = BODIES[pp.sub];
       if (wb && wb.pb && !wb.dead){ try { if (!wb.pb.isAwake()) wb.pb.setAwake(true); } catch(e){} }
     }
+  }
+}
+/* a grain that moved away from directly under a body: wake that body, nothing else */
+function wakeUnder(x, y){
+  var c = pixelMap[x], pp = c && c[y - 1];
+  if (pp && pp.sub !== undefined){
+    var wb = BODIES[pp.sub];
+    if (wb && wb.pb && !wb.dead && !wb.pb.isAwake()){ try { wb.pb.setAwake(true); } catch(e){} }
   }
 }
 function mark(x,y){ if (INPROXY) return; var gk = GK(x,y); TERRAIN_DIRTY = 1; wakeAt(x, y); if (dirtyA.length > 6000) return; if (!dirtyS.has(gk)){ dirtyS.add(gk); dirtyA.push(gk); } }
@@ -292,8 +212,6 @@ function hashXY(lx, ly){
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return (h ^ (h >>> 16)) >>> 0;
 }
-/* run an element's own animation tick on a scratch pixel seeded from the cell's location, so colours
-   and alpha come out identical for every copy and advance with the shared pixelTicks timer */
 /* The position an animated cell is PHASED from. Never the rounded grid spot its pixel landed on:
    an off-grid object rounds every cell by up to half a step in a pattern, and that pattern is exactly
    what showed up as pixels animated at the wrong phase. The object's own lattice gives every cell its
@@ -302,15 +220,20 @@ function animPhase(b, cell){
   var ox = Math.round(b && b.x !== undefined ? b.x : 0), oy = Math.round(b && b.y !== undefined ? b.y : 0);
   return [ox + (cell.x | 0), oy + (cell.y | 0)];
 }
+/* run an element's own animation tick on a scratch pixel seeded from the cell's location, so colours
+   and alpha come out identical for every copy and advance with the shared pixelTicks timer.
+   The scratch pixel is reused (no allocation per call). */
+var AS = { x: 0, y: 0, element: "", start: 0, colorstart: 0, temp: 20, color: 0, alpha: 1 };
 function animStep(cell, gx, gy){
   var a = animOf(cell.e);
   if (!a.anim || !a.pure) return false;
   var e = elements[cell.e];
-  /* the scratch pixel carries the tick the material was actually PLACED, so anything derived from it
-     (stained glass builds its hue from pixel.start) comes out exactly as it would on a normal pixel */
   var st = cell.s === undefined ? pixelTicks : cell.s;
-  var s = { x: gx, y: gy, element: cell.e, start: st, colorstart: st, temp: cell.t === undefined ? 20 : cell.t,
-            color: cell.c === undefined ? gx : cell.c, alpha: cell.al === undefined ? 1 : cell.al };
+  var s = AS;
+  s.x = gx; s.y = gy; s.element = cell.e; s.start = st; s.colorstart = st;
+  s.temp = cell.t === undefined ? 20 : cell.t;
+  s.color = cell.c === undefined ? gx : cell.c;
+  s.alpha = cell.al === undefined ? 1 : cell.al;
   try { (e.tick1 || e.tick).call(e, s); } catch(err){ return false; }
   var ch = false;
   if (a.col && s.color !== undefined && s.color !== cell.c){ cell.c = s.color; ch = true; }
@@ -322,56 +245,55 @@ function animStep(cell, gx, gy){
 function hash(s){ var h = 2166136261; for (var i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
 /* Every material in the Solids tab gets its own weight (w: a multiplier on its real density), its own
    strength (s: how fast something has to hit it before a pixel cracks) and its own brittleness
-   (b: how violently it lets go once it does). Tuned so the same slam leaves lead and steel alone,
-   chips brick and wood, and takes a glass pane apart pixel by pixel. */
+   (b: how violently it lets go once it does). */
 var SOLID_TUNE = {
-  adobe:             { w: 0.9, s: 0.3, b: 0.75 },                       // 1946 kg/m3
-  aluminum:          { w: 0.6, s: 0.48, b: 0.3 },                       // 2710 kg/m3
-  amber:             { w: 0.7, s: 0.2, b: 0.9 },                       // - kg/m3
-  bamboo:            { w: 0.5, s: 0.28, b: 0.3 },                       // 686 kg/m3
-  blue_gold:         { w: 1.3, s: 0.7, b: 0.1 },                       // 12900 kg/m3
-  brass:             { w: 1.15, s: 0.7, b: 0.16 },                       // 8550 kg/m3
-  brick:             { w: 0.95, s: 0.45, b: 0.45 },                       // 1650 kg/m3
-  bronze:            { w: 1.12, s: 0.74, b: 0.16 },                       // 8150 kg/m3
-  cloth:             { w: 0.4, s: 0.04, b: 0.1 },                       // 1314 kg/m3
-  copper:            { w: 1.2, s: 0.7, b: 0.16 },                       // 8960 kg/m3
-  dry_ice:           { w: 0.55, s: 0.08, b: 0.92 },                       // 1562 kg/m3
-  electrum:          { w: 1.35, s: 0.68, b: 0.1 },                       // 13750 kg/m3
-  gallium:           { w: 0.8, s: 0.22, b: 0.65 },                       // 5100 kg/m3
-  galvanized_steel:  { w: 1.15, s: 0.9, b: 0.12 },                       // 7850 kg/m3
-  glass:             { w: 0.8, s: 0.12, b: 1.0 },                       // 2500 kg/m3
-  gold:              { w: 1.45, s: 0.7, b: 0.1 },                       // 19300 kg/m3
-  hair:              { w: 0.5, s: 0.05, b: 0.05 },                       // 2395 kg/m3
-  ice:               { w: 0.5, s: 0.1, b: 0.95 },                       // 917 kg/m3
-  insulation:        { w: 0.15, s: 0.05, b: 0.2 },                       // 160 kg/m3
-  invar:             { w: 1.15, s: 0.85, b: 0.12 },                       // 8100 kg/m3
-  iron:              { w: 1.2, s: 0.82, b: 0.2 },                       // 7860 kg/m3
-  lead:              { w: 1.4, s: 0.9, b: 0.04 },                       // 11343 kg/m3
-  nickel:            { w: 1.2, s: 0.8, b: 0.16 },                       // 8900 kg/m3
-  nitrogen_ice:      { w: 0.55, s: 0.08, b: 0.92 },                       // 1562 kg/m3
-  paper:             { w: 0.35, s: 0.03, b: 0.25 },                       // 1201 kg/m3
-  particleboard:     { w: 0.5, s: 0.24, b: 0.45 },                       // 700 kg/m3
-  plastic:           { w: 0.55, s: 0.24, b: 0.3 },                       // 1052 kg/m3
-  porcelain:         { w: 0.85, s: 0.18, b: 0.95 },                       // 2403 kg/m3
-  purple_gold:       { w: 1.25, s: 0.66, b: 0.12 },                       // 11005 kg/m3
-  pyrite:            { w: 1.05, s: 0.55, b: 0.5 },                       // 4900 kg/m3
-  rad_glass:         { w: 0.8, s: 0.14, b: 0.98 },                       // 2500 kg/m3
-  rime:              { w: 0.2, s: 0.06, b: 0.9 },                       // 250 kg/m3
-  rose_gold:         { w: 1.3, s: 0.7, b: 0.1 },                       // 12900 kg/m3
-  ruins:             { w: 1.05, s: 0.4, b: 0.6 },                       // 2400 kg/m3
-  silver:            { w: 1.25, s: 0.66, b: 0.12 },                       // 10497 kg/m3
-  skin:              { w: 0.5, s: 0.06, b: 0.05 },                       // 1019.5 kg/m3
-  solder:            { w: 1.1, s: 0.4, b: 0.35 },                       // 8885 kg/m3
-  sponge:            { w: 0.1, s: 0.04, b: 0.1 },                       // 65 kg/m3
-  stained_glass:     { w: 0.8, s: 0.16, b: 0.95 },                       // 2500 kg/m3
-  steel:             { w: 1.15, s: 0.9, b: 0.12 },                       // 7850 kg/m3
-  sterling:          { w: 1.25, s: 0.68, b: 0.12 },                       // 10375.25 kg/m3
-  straw:             { w: 0.15, s: 0.05, b: 0.15 },                       // 67.5 kg/m3
-  tin:               { w: 0.95, s: 0.42, b: 0.3 },                       // 7260 kg/m3
-  tungsten:          { w: 1.55, s: 0.98, b: 0.06 },                       // 19300 kg/m3
-  wall:              { w: 1.0, s: 1.0, b: 0.0 },                       // 20000 kg/m3
-  wood:              { w: 0.55, s: 0.32, b: 0.2 },                       // 600 kg/m3
-  zinc:              { w: 1.05, s: 0.58, b: 0.22 },                       // 7068 kg/m3
+  adobe:             { w: 0.9, s: 0.3, b: 0.75 },
+  aluminum:          { w: 0.6, s: 0.48, b: 0.3 },
+  amber:             { w: 0.7, s: 0.2, b: 0.9 },
+  bamboo:            { w: 0.5, s: 0.28, b: 0.3 },
+  blue_gold:         { w: 1.3, s: 0.7, b: 0.1 },
+  brass:             { w: 1.15, s: 0.7, b: 0.16 },
+  brick:             { w: 0.95, s: 0.45, b: 0.45 },
+  bronze:            { w: 1.12, s: 0.74, b: 0.16 },
+  cloth:             { w: 0.4, s: 0.04, b: 0.1 },
+  copper:            { w: 1.2, s: 0.7, b: 0.16 },
+  dry_ice:           { w: 0.55, s: 0.08, b: 0.92 },
+  electrum:          { w: 1.35, s: 0.68, b: 0.1 },
+  gallium:           { w: 0.8, s: 0.22, b: 0.65 },
+  galvanized_steel:  { w: 1.15, s: 0.9, b: 0.12 },
+  glass:             { w: 0.8, s: 0.12, b: 1.0 },
+  gold:              { w: 1.45, s: 0.7, b: 0.1 },
+  hair:              { w: 0.5, s: 0.05, b: 0.05 },
+  ice:               { w: 0.5, s: 0.1, b: 0.95 },
+  insulation:        { w: 0.15, s: 0.05, b: 0.2 },
+  invar:             { w: 1.15, s: 0.85, b: 0.12 },
+  iron:              { w: 1.2, s: 0.82, b: 0.2 },
+  lead:              { w: 1.4, s: 0.9, b: 0.04 },
+  nickel:            { w: 1.2, s: 0.8, b: 0.16 },
+  nitrogen_ice:      { w: 0.55, s: 0.08, b: 0.92 },
+  paper:             { w: 0.35, s: 0.03, b: 0.25 },
+  particleboard:     { w: 0.5, s: 0.24, b: 0.45 },
+  plastic:           { w: 0.55, s: 0.24, b: 0.3 },
+  porcelain:         { w: 0.85, s: 0.18, b: 0.95 },
+  purple_gold:       { w: 1.25, s: 0.66, b: 0.12 },
+  pyrite:            { w: 1.05, s: 0.55, b: 0.5 },
+  rad_glass:         { w: 0.8, s: 0.14, b: 0.98 },
+  rime:              { w: 0.2, s: 0.06, b: 0.9 },
+  rose_gold:         { w: 1.3, s: 0.7, b: 0.1 },
+  ruins:             { w: 1.05, s: 0.4, b: 0.6 },
+  silver:            { w: 1.25, s: 0.66, b: 0.12 },
+  skin:              { w: 0.5, s: 0.06, b: 0.05 },
+  solder:            { w: 1.1, s: 0.4, b: 0.35 },
+  sponge:            { w: 0.1, s: 0.04, b: 0.1 },
+  stained_glass:     { w: 0.8, s: 0.16, b: 0.95 },
+  steel:             { w: 1.15, s: 0.9, b: 0.12 },
+  sterling:          { w: 1.25, s: 0.68, b: 0.12 },
+  straw:             { w: 0.15, s: 0.05, b: 0.15 },
+  tin:               { w: 0.95, s: 0.42, b: 0.3 },
+  tungsten:          { w: 1.55, s: 0.98, b: 0.06 },
+  wall:              { w: 1.0, s: 1.0, b: 0.0 },
+  wood:              { w: 0.55, s: 0.32, b: 0.2 },
+  zinc:              { w: 1.05, s: 0.58, b: 0.22 }
 };
 
 var NOSHATTER = { paper: 1, cloth: 1, straw: 1, sponge: 1, insulation: 1, hair: 1, skin: 1 };
@@ -400,13 +322,12 @@ function physOf(id){
   }
   dens = Math.max(30, Math.min(30000, dens));
   hard = clamp(hard, 0.02, 1);
-  /* light stuff floats down instead of dropping like a rock: weight you can feel without touching physics */
+  /* light stuff floats down instead of dropping like a rock */
   var damp = dens < 400 ? 0.055 : (dens < 1000 ? 0.018 : 0.002);
   var br = e.breakInto; if (Array.isArray(br)) br = br[0];
   var debris = (br && elements[br]) ? br : (elements.gravel ? "gravel" : null);
   P = PC[id] = { dens: dens, bounce: bounce, fric: fric, hard: hard, brittle: brittle,
                  damp: damp, debris: debris, unbreakable: hard >= 1,
-                 /* fibres and foams are too light to shatter: they fold, they do not crack */
                  noshatter: NOSHATTER[id] === 1 };
   return P;
 }
@@ -431,7 +352,7 @@ function spawnDebris(el, gx, gy, vx, vy){
   capBodies();
   var spot = freeSpotNear(Math.round(gx), Math.round(gy), 3); if (!spot) return null;
   var dg = 0;
-  while (DEBRIS.length >= DEBRIS_MAX && dg++ < 90) retireDebris(DEBRIS[0], true);   // forced: never spin on a budget
+  while (DEBRIS.length >= DEBRIS_MAX && dg++ < 90) retireDebris(DEBRIS[0], true);
   if (DEBRIS.length >= DEBRIS_MAX) return null;
   var cells = new Map();
   cells.set(K(0, 0), { x: 0, y: 0, e: el, c: undefined, t: 20, s: pixelTicks });
@@ -502,7 +423,7 @@ function initWorld(){
   terrain.createFixture(PL.Box(2000, 50, PL.Vec2(mx, B.y0 - 0.5 - 50)), bd);
   terrain.createFixture(PL.Box(2000, 50, PL.Vec2(mx, B.y1 + 0.5 + 50)), bd);
   world.on("begin-contact", onBegin);
-  world.on("post-solve", onPost);
+  /* no post-solve listener: powder colliders are sensors, which never produce solved contacts */
 }
 function bodyVelAt(pb, pt){ var v = pb.getLinearVelocityFromWorldPoint(pt); return { x: v.x, y: v.y }; }
 function onBegin(contact){
@@ -514,16 +435,6 @@ function onBegin(contact){
   var s = (va.x - vb.x)*n.x + (va.y - vb.y)*n.y;
   if (s < 0.3) return;
   impacts.push({ ua: ua, ub: ub, s: s, x: pt.x, y: pt.y });
-}
-function onPost(contact, impulse){
-  var fa = contact.getFixtureA(), fb = contact.getFixtureB(), ua = fa.getUserData(), ub = fb.getUserData();
-  if (!ua || !ub) return;
-  var body = ua.b ? ua : (ub.b ? ub : null), soil = ua.kind === 2 ? ua : (ub.kind === 2 ? ub : null);
-  if (!body || !soil) return;
-  var ni = impulse && impulse.normals, imp = 0, i;
-  if (ni) for (i = 0; i < ni.length; i++) imp += ni[i];
-  var wm = contact.getWorldManifold(null); if (!wm || !wm.points || !wm.points.length) return;
-  pushes.push({ f: imp/DT, x: wm.points[0].x, y: wm.points[0].y, run: soil, b: body.b });
 }
 
 /* ---------------------------------------------------------- body building */
@@ -539,9 +450,7 @@ function makeBody(cells, ang){
   calc(b); BODIES[b.id] = b; return b;
 }
 function raster(b, x, y, a){
-  /* One grid point per cell, computed straight from the cell. The old version scanned the body's whole
-     bounding box and inverted the rotation for every point in it: (2r+1)^2 work for a shape that might
-     only have a few hundred pixels. This is one multiply and one round() per cell, no scan. */
+  /* One grid point per cell, computed straight from the cell: one multiply and one round() per cell. */
   var c = Math.cos(a), s = Math.sin(a), out = { gx: [], gy: [], ck: [] };
   var placed = b.cells.size > 240 ? new Set() : null;
   b.cells.forEach(function(cell, ck){
@@ -707,7 +616,7 @@ function walkRiders(pix, cb){
   while (p && k < 40 && isPowderPix(p)){ cb(p, p.y - pix.y); p = pxAt(p.x, p.y - 1); k++; }
 }
 function collectRiders(b){
-  var out = [], seen = new Set(), smp = sampleProxies(b, 220);
+  var out = [], seen = new Set(), smp = sampleProxies(b, 120);
   for (var i = 0; i < smp.length; i++){
     var pix = smp[i];
     walkRiders(pix, function(p, oy){ if (out.length < 1200 && !seen.has(p)){ seen.add(p); out.push({ p: p, ck: pix.ck, oy: oy }); } });
@@ -715,8 +624,7 @@ function collectRiders(b){
   return out;
 }
 /* Rebuild every pixel of a body from scratch - the same thing that happens every frame while the body
-   is moving. A still body kept its pixels, so anything that went stale in one of them (position, cell,
-   colour, alpha) stayed wrong forever and showed up as scattered bad pixels. */
+   is moving. */
 function refreshProxies(b){
   b.proxies.forEach(function(pix){
     if (!pix || pix.del) return;
@@ -794,7 +702,7 @@ function syncProxies(b, R0){
     });
   }
   b.sx = b.x; b.sy = b.y; b.sa = b.a;
-  compactPixels();
+  compactPixels();                                            // no-op inside the tick: done once at its end
 }
 function releaseProxies(b){
   b.proxies.forEach(function(pix){
@@ -822,6 +730,17 @@ function dissolveBody(b){
   killBody(b);
 }
 var stepping = false, KILLQ = [], shardBudget = 4, retireBudget = 8, MAXBODIES = 240;
+function flushKills(){
+  var q = KILLQ; KILLQ = [];
+  for (var i = 0; i < q.length; i++){
+    var b = q[i];
+    try {
+      releaseProxies(b);
+      if (b.pb && world){ world.destroyBody(b.pb); b.pb = null; }
+      if (GRAB && GRAB.b === b) GRAB = null;
+    } catch(e){}
+  }
+}
 function killBody(b){
   if (!b || b.dead) return;
   if (b.pb && world && stepping){                    /* destroying a body inside world.step corrupts the solver */
@@ -835,15 +754,13 @@ function killBody(b){
 /* animated materials on a body: colours and alpha advance from the shared pixelTicks timer and from
    the cell's own location, so every copy of an object animates identically and in step */
 function bodyIsAnimated(b){
-  /* the cached answer is dropped as soon as the body gains or loses cells: a body that was empty (or
-     plain) when we last looked must not be ignored for the next 30 ticks */
   if (b.anim !== undefined && !b.animDirty) return b.anim;
   var out = false;
-  b.cells.forEach(function(cell){ if (out) return; if (animOf(cell.e).anim) out = true; });   /* any cell, not just the first few */
+  b.cells.forEach(function(cell){ if (out) return; if (animOf(cell.e).anim) out = true; });
   b.anim = out; b.animDirty = 0;
   return out;
 }
-var ANIM_BUDGET = 60000;   /* the game's own pixel loop also ticks proxies; if we skip any, the two writers disagree */
+var ANIM_BUDGET = 60000;
 function animateBodies(){
   var ids = Object.keys(BODIES), budget = ANIM_BUDGET, work = 0;
   for (var i = 0; i < ids.length && budget > 0; i++){
@@ -866,11 +783,9 @@ function animateBodies(){
   }
   return work;
 }
-/* the game works on the footprint pixels (acid, fire, heat, animation...). Pull results back into the body. */
 /* A body pixel changed material - by a reaction, a tool, a virus, an acid, anything. The change is
    accepted the moment it happens: the cell becomes the new material when that material can be a physics
-   object, and otherwise the pixel leaves the body and lives on as a normal pixel of the new material.
-   Nothing about the material other than movement is disabled; its own tick and reactions keep running. */
+   object, and otherwise the pixel leaves the body and lives on as a normal pixel of the new material. */
 function acceptProxyElement(b, pix){
   if (!b || !pix || pix.ck === undefined) return false;
   var cell = b.cells.get(pix.ck);
@@ -904,7 +819,7 @@ function watchProxies(b){
       cell = b.cells.get(pix.ck); if (!cell) return;   /* it left the body: nothing left to watch here */
     }
     var an = animOf(cell.e); if (an.col) cell.c = pix.color; if (an.alp) cell.al = pix.alpha; cell.px = pix;
-    cell.t = pix.temp; cell.chg = pix.charge ? 1 : 0;      /* one pixel per cell: no averaging to do */
+    cell.t = pix.temp; cell.chg = pix.charge ? 1 : 0;
   });
   if (b.animDirty && b.anim) b.anim = undefined;           /* a material change may add or remove animation */
 }
@@ -968,16 +883,19 @@ function refreshTerrain(){
   RIDERS.clear();
   for (i = 0; i < ids.length; i++){
     var b = BODIES[ids[i]]; if (!b || b.dead) continue;
+    /* powder only needs colliders for a body that is actually moving fast; a slow one never touched them */
+    var sens = 0;
+    if (b.pb){ var v0 = b.pb.getLinearVelocity(); sens = (Math.abs(v0.x) + Math.abs(v0.y) > 0.9) ? 1 : 0; }
     /* a body that has not moved keeps last pass's fixtures and riders: no rescan */
-    var moved = b.tEp !== TE || b.tcx === undefined || Math.abs(b.x - b.tcx) > 0.4 || Math.abs(b.y - b.tcy) > 0.4 || Math.abs(b.a - b.tca) > 0.02;
+    var moved = b.tEp !== TE || b.tsens !== sens || b.tcx === undefined || Math.abs(b.x - b.tcx) > 0.4 || Math.abs(b.y - b.tcy) > 0.4 || Math.abs(b.a - b.tca) > 0.02;
     if (!moved){
       var cc = b.trects || [];
       for (var ci = 0; ci < cc.length; ci++) if (!want.has(cc[ci].k)) want.set(cc[ci].k, cc[ci].r);
       if (b.triders) b.triders.forEach(function(p){ RIDERS.add(p); });
       continue;
     }
-    b.tcx = b.x; b.tcy = b.y; b.tca = b.a; b.tEp = TE;
-    var rs = new Set(), smp = sampleProxies(b, 260);
+    b.tcx = b.x; b.tcy = b.y; b.tca = b.a; b.tEp = TE; b.tsens = sens;
+    var rs = new Set(), smp = sampleProxies(b, 120);
     for (var si = 0; si < smp.length; si++) walkRiders(smp[si], function(p){ rs.add(p); });   // piles on a body are carried, not solid walls
     b.triders = rs; rs.forEach(function(p){ RIDERS.add(p); });
     if (!b.pb){ b.trects = []; continue; }
@@ -987,9 +905,9 @@ function refreshTerrain(){
     for (x = x0; x <= x1; x++) for (y = y0; y <= y1; y++){
       var p = pxAt(x, y); if (!p || p.sub !== undefined || RIDERS.has(p)) continue;
       var e = elements[p.element]; if (!e || e.state === "liquid" || e.state === "gas") continue;
-      /* v5 rule: every movable material (powder/sand/gravel) is a SOFT sensor, so bodies can
-         push through it in any direction instead of resting on it like rock */
+      /* every movable material (powder/sand/gravel) is a SOFT sensor, so bodies can push through it */
       var kind = (e.movable === true) ? 2 : 1;
+      if (kind === 2 && !sens) continue;
       var surf = false;
       for (var d = 0; d < 4; d++){
         var n = pxAt(x + D4[d][0], y + D4[d][1]);
@@ -1049,9 +967,6 @@ function capBodies(){
   }
 }
 /* ---------------------------------------------------- fault lines and shards */
-/* Every object carries its own invisible fault lines: a jittered grid in its own cell grid, seeded per
-   body and never drawn. An impact does not delete pixels one by one, it runs along those lines and whole
-   shards come away, so a pane of glass cracks into a few pieces instead of exploding into dust. */
 function faultOf(b){
   if (b.fseed === undefined){
     b.fseed = (Math.random()*4294967296) >>> 0;
@@ -1097,8 +1012,8 @@ function detachZones(b, groups, vx, vy){
       cm.set(K(lx, ly), { x: lx, y: ly, e: e.c.e, c: e.c.c, t: e.c.t !== undefined ? e.c.t : 20, s: e.c.s });
     }
     var dg = 0;
-  while (DEBRIS.length >= DEBRIS_MAX && dg++ < 90) retireDebris(DEBRIS[0], true);   // forced: never spin on a budget
-  if (DEBRIS.length >= DEBRIS_MAX) return null;
+    while (DEBRIS.length >= DEBRIS_MAX && dg++ < 90) retireDebris(DEBRIS[0], true);
+    if (DEBRIS.length >= DEBRIS_MAX) return null;
     var nb = makeBody(cm, 0);
     nb.x = ox; nb.y = oy; nb.debris = 1; nb.hold = 0;
     ensurePB(nb);
@@ -1131,7 +1046,7 @@ function hurt(b, x, y, s, tH){
   if (!near) return 0;
   var P = physOf(near.e);
   if (P.unbreakable || P.noshatter) return 0;
-  var thr = 1.1 + 9.0*P.hard;                        // four times the old slope: only real smashes register
+  var thr = 1.1 + 9.0*P.hard;                        // only real smashes register
   if (sE <= thr) return 0;
   var over = (sE - thr)/Math.max(0.6, thr);
   if (!chance(Math.min(0.85, 0.25*(1 + over)))) return 0;   // and most hits still do nothing at all
@@ -1202,29 +1117,6 @@ function processImpacts(){
   });
   impacts.length = 0;
 }
-function processPushes(){
-  var done = new Set();
-  pushes.forEach(function(ps){
-    var run = ps.run, gx = Math.max(run.x0, Math.min(run.x1, Math.round(ps.x))), gy = run.y, gk = GK(gx, gy);
-    if (done.has(gk)) return;
-    var p = pxAt(gx, gy); if (!p || p.sub !== undefined) return;
-    var e = elements[p.element]; if (!e) return;
-    var resist = (e.density || 1500)/1000 * G * 15;                    // grains hold up a light body but yield to a heavy/fast one
-    if (ps.f < resist) return;
-    var bb = ps.b;
-    if (bb.sref === undefined || pixelTicks - bb.sT > 30) bb.sref = bb.y;      // sinking budget: ~4 pixels, then it rests
-    bb.sT = pixelTicks;
-    if (bb.y - bb.sref > 4) return;
-    done.add(gk);
-    var dx = gx - ps.b.x, dy = gy - ps.b.y, l = Math.sqrt(dx*dx + dy*dy) || 1;
-    var ox = p.x, oy = p.y;
-    if (relocate(p, p.x, p.y, null, null)){
-      var sp = Math.min(1.6, 0.3 + ps.f/(resist*3));
-      p.pvx = dx/l*sp + (Math.random() - 0.5)*0.3; p.pvy = dy/l*sp - 0.15;
-    }
-  });
-  pushes.length = 0;
-}
 function flyGrain(p){
   p.pvy = (p.pvy || 0) + G*0.7;
   p.pvx = (p.pvx || 0) * 0.96; p.pvy *= 0.98;
@@ -1265,7 +1157,7 @@ function surfaceNear(minX, maxX, minY, maxY){
   }
   return null;
 }
-var FI_ROWS = new Map(), FI_USED = [], FI_OUT = { n:0, cx:0, cy:0, rho:1000 };
+var FI_ROWS = new Map(), FI_USED = [];
 function fluidInfo(b, R){
   var rows = FI_ROWS, used = FI_USED, i, gx, gy, k, minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
   for (i = 0; i < used.length; i++){ var ua = rows.get(used[i]); ua[0] = 1e9; ua[1] = -1e9; }
@@ -1305,28 +1197,22 @@ function isFaller(p){ return p && !p.del && p.sub === undefined && fallEl(p.elem
 var INPROXY = false;
 var PIXDIRTY = false;
 /* a pixel the mod removed must leave Sandboxels' currentPixels as well, or it gets ticked and
-   writes itself back into the map (= material cloning itself, one extra physics object each time) */
+   writes itself back into the map (= material cloning itself). Inside the per-tick hook this is
+   deferred and done ONCE at the end of the tick; edits made between ticks clean up immediately. */
 function compactPixels(){
-  if (!PIXDIRTY) return;
+  if (!PIXDIRTY || INTICK) return;
   PIXDIRTY = false;
-  if (typeof currentPixels === "undefined" || !currentPixels || !currentPixels.length) return;
-  var keep = [];
-  for (var i = 0; i < currentPixels.length; i++){
-    var p = currentPixels[i];
-    if (!p) continue;
+  var cp = (typeof currentPixels !== "undefined") ? currentPixels : null;
+  if (!cp || !cp.length) return;
+  var w = 0, n = cp.length;
+  for (var i = 0; i < n; i++){
+    var p = cp[i]; if (!p) continue;
     if (p.del){ p.inPx = false; continue; }
-    p.inPx = true; keep.push(p);
+    p.inPx = true; if (w !== i) cp[w] = p; w++;
   }
-  if (keep.length === currentPixels.length) return;
-  currentPixels.length = 0;
-  for (i = 0; i < keep.length; i++) currentPixels.push(keep[i]);
+  if (w !== n) cp.length = w;
 }
 function dropPix(p){ p.del = true; p.sub = undefined; p.inPx = false; PIXDIRTY = true; }
-var SSC = {};
-/* a solid that is neither a grain nor an anchor: it must get physics if its region is unsupported,
-   even if the "does it fall" heuristic says no. this is what makes coverage exhaustive. */
-/* "soft solid" used to allow M1 materials (concrete, quicklime, mudstone...) into a body as riders.
-   Under the hard rule those are not solids, so a soft solid is simply a material that may have physics. */
 function isSoftSolid(id){
   return fallEl(id);
 }
@@ -1348,17 +1234,12 @@ function bodyFromPixels(list){
   return b;
 }
 var SDIR = [[0,-1],[-1,0],[1,0],[0,1]];             // down is explored first (it is popped last-pushed)
-/* grounded = connected, through solids AND powders, to the world edge or an anchored block.
-   liquids, gases and other physics bodies never hold anything up. */
-/* a cluster of a material that already has a body right next to it belongs to that body: adding a
-   second overlapping object is how a duplicating material ends up fighting itself */
+/* a cluster of a material that already has a body right next to it belongs to that body */
 function bodyHasMat(b, mat){
   var it = b.cells.values(), n = 0;
   while (n++ < 20000){ var v = it.next(); if (v.done) return false; if (v.value.e === mat) return true; }
   return false;
 }
-/* how far a loose cluster is from an object's actual pixels. Using the object's centre made a patch
-   drawn beside a long object look "far away" and spawn a second object of its own. */
 function bodyGap(b, cx, cy){
   var minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9, n = 0;
   b.proxies.forEach(function(p){
@@ -1379,8 +1260,6 @@ function adoptIntoNearbyBody(grp){
   for (i = 0; i < ids.length; i++){
     var b = BODIES[ids[i]];
     if (!b || b.dead || b.debris) continue;
-    /* match on the whole body, not just the cell that happens to come out of the map first: a body
-       made of two materials used to refuse its own second material and spawn a separate object */
     if (Math.abs(b.x - cx) > b.rad + 14 || Math.abs(b.y - cy) > b.rad + 14) continue;
     var d = bodyGap(b, cx, cy);
     if (d >= best || d > 7) continue;
@@ -1393,6 +1272,8 @@ function adoptIntoNearbyBody(grp){
   if (joined) { host.dirty = true; host.hold = pixelTicks + HOLD; }
   return joined > 0;
 }
+/* grounded = connected, through STATIC solids, to the world edge or an anchored block.
+   liquids, gases, powders and other physics bodies never hold anything up. */
 function checkSupport(p, checked){
   if (!scanWorthy(p)) return;                                    // grains and anchors never seed a body
   var fall = [p], seen = new Set([p]), stack = [p], supported = false, host = null;
@@ -1412,11 +1293,7 @@ function checkSupport(p, checked){
       if (fallEl(n.element)){ seen.add(n); fall.push(n); stack.push(n); continue; }
       if (e.state && e.state !== "solid") continue;        // liquid, gas, molten, any odd mod state: never a surface
       if (isAnchoredEl(n)){ supported = true; break; }
-      /* A powder is not ground. It flows out from under whatever is sitting on it, so support that
-         runs through powder is what turned a bowl of sand into a loop: the shell holds the sand up,
-         the sand held the shell up, and the pair of them hung in the air. Only stuff that stays put
-         conducts support now; powder holds nothing up and is never remembered as ground. */
-      if (selfMoving(n.element, e)) continue;
+      if (selfMoving(n.element, e)) continue;              // powder holds nothing up
       seen.add(n); stack.push(n);                                     // static solids conduct support
     }
   }
@@ -1427,7 +1304,6 @@ function checkSupport(p, checked){
     fall.forEach(function(px){
       if (px.del || px.sub !== undefined) return;
       var recent = (px.pa !== undefined && pixelTicks - px.pa <= 12);
-      /* freshly placed, or a material the body already contains: it is part of that object already */
       if (recent || bodyHasMat(host, px.element)) joinPixel(host, px);
       else rest.push(px);
     });
@@ -1435,7 +1311,7 @@ function checkSupport(p, checked){
     if (!fall.length) return;
   }
   var inFall = new Set(fall);
-  seen.forEach(function(px){                                    // non-grain solids count too: "it does not fall" is not an excuse
+  seen.forEach(function(px){
     if (!inFall.has(px) && px.sub === undefined && !px.del && isSoftSolid(px.element)){ inFall.add(px); fall.push(px); }
   });
   var byPos = new Map(), done = new Set(), lost = false;        // every solid group in the floating region becomes a body
@@ -1458,8 +1334,7 @@ function checkSupport(p, checked){
     });
   }
 }
-/* queue every falling pixel on the map for one full support pass. Used after a load/reset,
-   where whole chunks of a save can sit in mid-air without ever being edited. */
+/* queue every falling pixel on the map for one full support pass. */
 function startSweep(){
   sweepQ = []; sweepChecked = new Set();
   if (!pixelMap || !pixelMap.length){ sweepQ = null; sweepChecked = null; return false; }
@@ -1491,16 +1366,15 @@ function processSupport(){
     }
   }
   if (sweepQ){                                   // full-map / audit pass, budgeted so a big save cannot stall a frame
-    while (sweepQ.length && scanNodes < 90000){
+    while (sweepQ.length && scanNodes < 30000){
       var sp = sweepQ.pop();
       if (!scanWorthy(sp) || checked.has(sp) || GC.has(sp)) continue;
       checkSupport(sp, checked);
     }
     if (!sweepQ.length){ sweepQ = null; sweepChecked = null; }
   }
-  compactPixels();
   if (typeof currentPixels !== "undefined" && currentPixels.length){
-    for (i = 0; i < 8; i++){
+    for (i = 0; i < 4; i++){
       var r = currentPixels[Math.floor(Math.random()*currentPixels.length)];
       if (r && !checked.has(r) && !GC.has(r) && scanWorthy(r) && pixelMap[r.x] && pixelMap[r.x][r.y] === r) checkSupport(r, checked);
     }
@@ -1660,14 +1534,19 @@ function wrap(name, make){
   var o = globalThis[name];
   if (typeof o === "function" && !o.__sl){ var w = make(o); w.__sl = true; globalThis[name] = w; }
 }
-function quiet(p){ var e = p && elements[p.element]; return !p || p.sub !== undefined || (e && (e.state === "liquid" || e.state === "gas")); }
+/* "quiet" = a change that can never affect what is supported: bodies' own pixels, liquids, gases and
+   powders (powder holds nothing up, so grains moving around must not trigger any scan) */
+function quiet(p){
+  var e = p && elements[p.element];
+  return !p || p.sub !== undefined || (e && (e.state === "liquid" || e.state === "gas" || (e.movable === true && !e.anchored && !fallEl(p.element))));
+}
 wrap("createPixel", function(o){ return function(el, x, y){
   o(el, x, y);
   if (!NOJOIN){ var p = pxAt(x, y); if (p && isFaller(p)) mark(x, y); } }; });
 wrap("deletePixel", function(o){ return function(x, y){
   var p = pixelMap[x] && pixelMap[x][y];
   if (ERASEGUARD && p && p.sub !== undefined) return;
-  var q = quiet(p); o(x, y); if (!q) mark(x, y); }; });
+  var q = quiet(p); o(x, y); if (!q) mark(x, y); else wakeUnder(x, y); }; });
 wrap("changePixel", function(o){ return function(pixel){
   var q = quiet(pixel), sub = pixel && pixel.sub, ck = pixel && pixel.ck;
   o.apply(this, arguments);
@@ -1675,7 +1554,7 @@ wrap("changePixel", function(o){ return function(pixel){
   if (sub !== undefined && pixel && pixel.sub === sub && BODIES[sub]) acceptProxyElement(BODIES[sub], pixel);
   if (!q || !quiet(pixel)) mark(pixel.x, pixel.y); }; });
 wrap("movePixel", function(o){ return function(pixel, x, y){
-  var q = quiet(pixel), ox = pixel.x, oy = pixel.y; o.apply(this, arguments); if (!q) mark(ox, oy); }; });
+  var q = quiet(pixel), ox = pixel.x, oy = pixel.y; o.apply(this, arguments); if (!q) mark(ox, oy); else wakeUnder(ox, oy); }; });
 wrap("swapPixels", function(o){ return function(a, b){
   var q = quiet(a) && quiet(b), ax = a.x, ay = a.y, bx = b.x, by = b.y; o(a, b); if (!q){ mark(ax, ay); mark(bx, by); } }; });
 wrap("explodeAt", function(o){ return function(x, y, radius, fire){
@@ -1713,8 +1592,7 @@ function line4(x0, y0, x1, y1){                    // 4-connected line: never le
   return pts;
 }
 function bodyNear(x, y, reach){
-  /* the pointer sits between pixels (the brush works in sub-cell space), and a fractional coordinate
-     indexes nothing in pixelMap - so look at the pixel the pointer is actually over */
+  /* the pointer sits between pixels, and a fractional coordinate indexes nothing in pixelMap */
   x = Math.round(x); y = Math.round(y);
   for (var d = 0; d <= reach; d++){
     for (var dx = -d; dx <= d; dx++) for (var dy = -d; dy <= d; dy++){
@@ -1734,10 +1612,7 @@ function strokeBodies(x1, y1, x2, y2, reach){
   return out;
 }
 function brushSize(){ return (typeof mouseSize !== "undefined" && mouseSize) ? mouseSize : 1; }
-/* ONE rule for the square you see and the edit it performs. The brush only ever touches the object
-   whose pixels are under the brush at this instant, so the cursor turns with an object exactly when
-   the edit is going to land in that object's own grid - and never for the body the stroke passed
-   through a moment ago, which is what made an erase happen at an angle while the square sat straight. */
+/* ONE rule for the square you see and the edit it performs. */
 function brushReachOf(el, ed, sz){
   if (el === "erase") return Math.max(0, Math.floor(sz/2));
   if (ed && (!ed.tool || ed.canPlace) && fallEl(el)) return Math.max(0, Math.floor(sz/2));
@@ -1758,8 +1633,6 @@ function brushTarget(){
   var P = pointerPt(); if (!P) return null;
   return bodyNear(P.x, P.y, reach);
 }
-/* the line to sweep: only continues from the last pointer position when that position was on the
-   same object, so a stroke that wanders off never carves a line into the object it left behind */
 function strokeEnds(st, b, reach){
   var P = pointerPt(), ep = endpoints(st);
   if (!P) return ep;
@@ -1882,7 +1755,6 @@ wrap("drawCursor", function(o){ return function(){
   lctx.restore();
 }; });
 
-/* --------------------------------------------------------------- hooks */
 /* ---------------------------------------------------------------- gravity setting */
 function applyGravitySetting(){
   var v = (typeof settings === "object" && settings) ? settings[GRAV_SETTING] : undefined;
@@ -1931,12 +1803,14 @@ function addGravitySetting(){
   host.appendChild(document.createTextNode(" "));
   host.appendChild(wrap);
 }
-runEveryTick(function(){
+
+/* --------------------------------------------------------------- per-tick hook */
+function tickMain(){
   if (!PL) loadPlanck();
   if (PL && !world) initWorld();
   if (pixelTicks % 90 === 0 && Object.keys(elements).length !== hookedCount) hookAll();
   if (!world) return;
-  if (!sweepQ && pixelTicks > 30 && pixelTicks % 240 === 0) startSweep();   // rolling audit: nothing stays airborne
+  if (!sweepQ && pixelTicks > 30 && pixelTicks % 900 === 0) startSweep();   // rolling audit: nothing stays airborne
   if (sweepAt >= 0 && pixelTicks >= sweepAt){                       // full-map pass on boot / load / reset
     sweepAt = -1;
     if (!sweepQ){
@@ -1965,15 +1839,15 @@ runEveryTick(function(){
     }
   }
   ids = Object.keys(BODIES);
+  var even = (pixelTicks % 2) === 0;
   for (i = 0; i < ids.length; i++){
     b = BODIES[ids[i]];
     if (!b || b.dead) continue;
     ensurePB(b);
-    /* An animated object re-builds its pixels every frame, exactly the way a MOVING object does.
-       That is the only state in which every proxy is freshly created, and a fresh pixel is not ticked
-       by the game on the frame it appears, so the object's own colours/alpha are what get drawn. */
+    /* An animated object re-builds its pixels (every 2nd tick), the way a MOVING object does: a fresh
+       pixel is not ticked by the game on the frame it appears, so the object's own colours/alpha show. */
     if (b.proxies && b.proxies.size && bodyIsAnimated(b)){
-      if (b.proxies.size <= 400 || (pixelTicks % 3) === 0){ refreshProxies(b); continue; }
+      if (even && (b.proxies.size <= 400 || (pixelTicks % 6) === 0)){ refreshProxies(b); continue; }
     }
     if (b.needSync){ b.needSync = false; syncProxies(b); }
   }
@@ -1994,8 +1868,8 @@ runEveryTick(function(){
     var m = b.pb.getMass(), lin = 0.002, ang = 0.02, Fb = 0, v = b.pb.getLinearVelocity();
     var sp = Math.sqrt(v.x*v.x + v.y*v.y);
     /* what surrounds the body only needs measuring again when it moves or something changed */
-    var freshF = b.flT === undefined || b.dirty || sp > 0.45 || (pixelTicks - b.flT) >= 3 ||
-                 (Math.abs(b.x - b.flX) + Math.abs(b.y - b.flY)) > 0.6;
+    var freshF = b.flT === undefined || b.dirty || sp > 0.6 || (pixelTicks - b.flT) >= 5 ||
+                 (Math.abs(b.x - b.flX) + Math.abs(b.y - b.flY)) > 0.8;
     var fl = freshF ? fluidInfo(b, R) : b.fl;
     b.wet = fl.n;
     if (freshF){ b.fl = fl; b.flT = pixelTicks; b.flX = b.x; b.flY = b.y; }
@@ -2037,34 +1911,34 @@ runEveryTick(function(){
     if (pfr > 0){ var wc0 = b.pb.getWorldCenter(); forces.push({ b: b, F: Fb, x: wc0.x, y: wc0.y }); }
     else forces.push({ b: b, F: Fb, x: fl.cx, y: fl.cy });
   }
-  if (pixelTicks % 20 === 0) TERRAIN_DIRTY = 1;               // safety net for changes no hook sees (acid, fire, saves)
+  if (pixelTicks % 60 === 0) TERRAIN_DIRTY = 1;               // safety net for changes no hook sees (acid, fire, saves)
   if (TERRAIN_DIRTY){ TERRAIN_DIRTY = 0; TE++; refreshTerrain(); }
-  else if (pixelTicks % 2 === 0) refreshTerrain();
-  /* direct powder push: scan the surface of each body's proxy footprint (uses live velocity pre-step) */
+  else if (maxSp > 0.03 && even) refreshTerrain();            // nothing moving = nothing to rescan
+  /* direct powder push: shove and fling grains that a fast body is driving into */
   for (i = 0; i < ids.length; i++){
-    b = BODIES[ids[i]]; if (!b || b.dead || !b.pb || b.pb.getType() !== "dynamic" || !b.pb.isAwake()) continue;
+    b = BODIES[ids[i]]; if (!b || b.dead || !b.pb || b.settled || b.pb.getType() !== "dynamic" || !b.pb.isAwake()) continue;
     var bvp = b.pb.getLinearVelocity(), bsp = Math.sqrt(bvp.x*bvp.x + bvp.y*bvp.y);
     if (bsp < 0.08) continue;
     var bvLen = Math.sqrt(bvp.x*bvp.x+bvp.y*bvp.y)||1, bdx=bvp.x/bvLen, bdy=bvp.y/bvLen;
     var ahead = Math.min(2, Math.ceil(bsp));
     var bmass = b.pb.getMass();
-    var probe = sampleProxies(b, 220);                 // sampled: a huge body does not scan every pixel
+    var probe = sampleProxies(b, 100);                 // sampled: a huge body does not scan every pixel
     for (var qi = 0; qi < probe.length; qi++){
       var pix = probe[qi];
       for (var stp = 0; stp <= ahead; stp++){
         var fx = Math.round(pix.x + bdx*stp), fy = Math.round(pix.y + bdy*stp);
         for (var d = 0; d < 4; d++){
+          var vn = bvp.x * D4[d][0] + bvp.y * D4[d][1];                  // body velocity towards the grain
+          if (vn <= 0) continue;                                          // only directions of travel
           var nx = fx + D4[d][0], ny = fy + D4[d][1];
           if (outOfBounds(nx, ny)) continue;
           var g = pixelMap[nx][ny]; if (!g || g.del || g.sub !== undefined) continue;
           var ge = elements[g.element]; if (!ge) continue;
           if (ge.state !== "solid" || ge.movable !== true) continue;      // only powders
-          var vn = bvp.x * D4[d][0] + bvp.y * D4[d][1];                  // body velocity towards the grain
-          if (vn <= 0) continue;
           if (bmass < (ge.density || 1000)/1000 * 1.0) continue;          // only very-light bodies rest on powder
-          var frac = Math.min(1, (vn - 0.05) * 0.4 * bmass * 0.01);
-          if (frac <= 0) continue;
-          if (!chance(Math.min(0.9, frac))) continue;
+          var frac2 = Math.min(1, (vn - 0.05) * 0.4 * bmass * 0.01);
+          if (frac2 <= 0) continue;
+          if (!chance(Math.min(0.9, frac2))) continue;
           if (relocate(g, nx, ny, null, null)){
             g.pvx = D4[d][0] * Math.min(1.4, vn * 0.6 + (Math.random() - 0.5) * 0.3);
             g.pvy = D4[d][1] * Math.min(1.4, vn * 0.5) - 0.1;
@@ -2083,10 +1957,10 @@ runEveryTick(function(){
       pb.applyForce(PL.Vec2(gm*ax, gm*ay - gm*G*gb.gf*0.95), pt, true);
     }
     stepping = true;
-    try { world.step(DT, 6, 2); } finally { stepping = false; }
+    try { world.step(DT, 4, 2); } finally { stepping = false; }
     if (KILLQ.length) flushKills();
   }
-  processImpacts(); processPushes();
+  processImpacts();
   for (i = 0; i < ids.length; i++){
     b = BODIES[ids[i]]; if (!b || b.dead || !b.pb) continue;
     var ps = b.pb.getPosition(); b.x = ps.x; b.y = ps.y; b.a = b.pb.getAngle();
@@ -2096,7 +1970,12 @@ runEveryTick(function(){
       syncProxies(b, R0);
     }
   }
-  try { animateBodies(); } catch(e){}   /* last word on animated colours/alpha, after every rebuild */
+  if (even){ try { animateBodies(); } catch(e){} }   /* last word on animated colours/alpha, after every rebuild */
+}
+runEveryTick(function(){
+  INTICK = true;
+  try { tickMain(); }
+  finally { INTICK = false; compactPixels(); }        // ONE pixel-list cleanup per tick
 });
 var PX_S = { x:0, y:0, element:"", start:0, colorstart:0, temp:20, color:0, alpha:1 };
 runPerPixel(function(p){
@@ -2182,9 +2061,9 @@ if (globalThis.__SUBLEVEL_TEST__){
     gravity: function(){ return GRAV_ON; },
     processSupport: processSupport, placeLocal: placeLocal, localBrush: localBrush, eraseLocal: eraseLocal, world: function(){ return world; },
     GC: function(){ return GC; }, brushTarget: brushTarget, brushReachOf: brushReachOf, bodyNear: bodyNear, eraseStroke: eraseStroke, strokeEnds: strokeEnds,
-    hurt: hurt, removeCell: removeCell, spawnDebris: spawnDebris, DEBRIS: function(){ return DEBRIS; }, physOf: physOf };
+    hurt: hurt, removeCell: removeCell, spawnDebris: spawnDebris, DEBRIS: function(){ return DEBRIS; } };
 }
-if (typeof logMessage === "function") logMessage("Sublevel Physics v18 loaded (Planck.js). Load it LAST in the mod list.");
+if (typeof logMessage === "function") logMessage("Sublevel Physics v19 loaded (Planck.js). Load it LAST in the mod list.");
 
 })();
 
