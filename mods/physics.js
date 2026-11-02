@@ -1157,21 +1157,6 @@ function surfaceNear(minX, maxX, minY, maxY){
   }
   return null;
 }
-/* Is there enough water to hold anything up? One liquid pixel directly under the body, plus at
-   least two more around it. A puddle beside an object, a single stray pixel or a thin film is not
-   enough: those made floating bodies sit in mid-air next to water that was never under them. */
-function wetEnough(b, R){
-  var down = 0, side = 0, i, d;
-  for (i = 0; i < R.gx.length; i++){
-    var gx = R.gx[i], gy = R.gy[i];
-    if (liq(gx, gy + 1)) down++;                       /* directly under the underside (liq skips the body's own cells) */
-    for (d = 0; d < 4; d++){
-      if (d === 2) continue;                           /* that is the "under" pixel again */
-      if (liq(gx + D4[d][0], gy + D4[d][1])) side++;
-    }
-  }
-  return down >= 1 && side >= 2;
-}
 var FI_ROWS = new Map(), FI_USED = [];
 function fluidInfo(b, R){
   var rows = FI_ROWS, used = FI_USED, i, gx, gy, k, minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
@@ -1203,7 +1188,6 @@ function fluidInfo(b, R){
       if (!q || (q.sub === undefined && elements[q.element] && elements[q.element].state === "gas")){ cnt += f2; sx += x*f2; sy += k*f2; }
     }
   }
-  if (cnt > 0 && !wetEnough(b, R)){ out.n = 0; out.cx = b.x; out.cy = b.y; out.rho = S.rho; return out; }
   out.n = cnt; out.cx = cnt ? sx/cnt : b.x; out.cy = cnt ? sy/cnt : b.y; out.rho = S.rho;
   return out;
 }
