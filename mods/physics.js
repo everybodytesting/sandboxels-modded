@@ -1042,7 +1042,15 @@ function hurt(b, x, y, s, tH){
   var mass = 1;
   try { if (b.pb && b.pb.getMass) mass = Math.max(0.3, b.pb.getMass()); } catch(err){}
   var sE = s * (0.7 + 0.3*Math.min(2.5, mass/6));
-  var lc = toLocal(b, x, y), near = null, nd = 1e9, i;
+  /* Where the hit landed has to be measured against where the body actually is right now. The cached
+     pose is only refreshed on sync ticks, so a fast body was up to a dozen pixels stale by the time a
+     wall contact came in, the contact point landed outside the shape, no fault zone was near it and
+     the hit was thrown away. Bodies hitting each other usually do it slower, which is why only walls
+     looked like they never broke anything. */
+  var bx = b.x, by = b.y, ba = b.a;
+  try { if (b.pb && b.pb.getPosition){ var lp0 = b.pb.getPosition(); bx = lp0.x; by = lp0.y; ba = b.pb.getAngle(); } } catch(err){}
+  var ldx = x - bx, ldy = y - by, lcc = Math.cos(ba), lss = Math.sin(ba);
+  var lc = { x: ldx*lcc + ldy*lss, y: -ldx*lss + ldy*lcc }, near = null, nd = 1e9, i;
   b.cells.forEach(function(c){
     var dx = c.x - lc.x, dy = c.y - lc.y, d2 = dx*dx + dy*dy;
     if (d2 < nd){ nd = d2; near = c; }
