@@ -1157,6 +1157,23 @@ function surfaceNear(minX, maxX, minY, maxY){
   }
   return null;
 }
+/* Enough water to hold something up: one liquid pixel directly under the footprint, plus at
+   least three more touching it from the other sides. Water beside a body, or a single row of it,
+   is a puddle the body sits in - it should not lift anything. */
+function waterUnder(b, R){
+  var under = false, around = new Set(), i, d;
+  for (i = 0; i < R.gx.length; i++){
+    var gx = R.gx[i], gy = R.gy[i];
+    if (!under && liq(gx, gy + 1)) under = true;
+    for (d = 0; d < 4; d++){
+      if (d === 2) continue;                       /* straight down is the "under" pixel */
+      var nx = gx + D4[d][0], ny = gy + D4[d][1];
+      if (liq(nx, ny)) around.add(nx * 4096 + ny); /* distinct pixels, not one counted six times */
+    }
+    if (under && around.size >= 3) break;
+  }
+  return under && around.size >= 3;
+}
 var FI_ROWS = new Map(), FI_USED = [];
 function fluidInfo(b, R){
   var rows = FI_ROWS, used = FI_USED, i, gx, gy, k, minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
@@ -1876,7 +1893,10 @@ function tickMain(){
     b.Rt = pixelTicks; b.Rx = b.x; b.Ry = b.y; b.Ra = b.a; b.Rtick = R;
     maxSp = Math.max(maxSp, sp + Math.abs(b.pb.getAngularVelocity())*b.rad*0.5);
     if (fl.n > 0){
-      Fb = fl.rho/1000 * fl.n * G * GRAV_ON;
+      /* being wet still means water drag and a wet centroid whatever the water is doing. Only the
+         lifting force needs water that is genuinely underneath, so that is the only thing gated. */
+      if (freshF || b.wb === undefined) b.wb = waterUnder(b, R);
+      if (b.wb) Fb = fl.rho/1000 * fl.n * G * GRAV_ON;
       var capUp = G * 1.8 * m; if (Fb > capUp) Fb = capUp;
       var frac = Math.min(1, fl.n/b.cells.size), avgD = m / b.cells.size * 1000;
       lin = Math.min(0.7, frac*(0.14 + 0.16*sp + Math.min(0.3, 0.02*fl.rho/Math.max(30, avgD))));
