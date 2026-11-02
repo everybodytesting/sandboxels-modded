@@ -32,6 +32,7 @@ var tfix = new Map(), impacts = [], pushes = [], RIDERS = new Set(), GC = new Se
 var baseId = Math.floor(Math.random()*1e8) * 100, idc = 1;
 var NOJOIN = false, ERASEGUARD = false, dirtyA = [], dirtyS = new Set(), hookedCount = 0;
 var sweepQ = null, sweepChecked = null, scanNodes = 0, sweepAt = 2, sweepTries = 0;   // full-map support sweep state
+var HITIN = 0.15;              // every collider is inset 30% of a pixel (0.15 a side): a 1px cell collides as 0.7px
 var MAXFIX = 140;              // collider budget per body
 var PROXYCAP = 150;            // proxies looked at per body per scan
 var bodyBudget = 6;            // new bodies allowed per tick (keeps a save load smooth)
@@ -422,10 +423,10 @@ function initWorld(){
   try { if (PL.Settings) PL.Settings.maxTranslation = 40; } catch(e){}
   terrain = world.createBody({ type: "static" });
   var B = playableBounds(), my = (B.y0 + B.y1)/2, mx = (B.x0 + B.x1)/2, bd = { friction: 0.8, userData: { t: 1, kind: 1, border: 1 } };
-  terrain.createFixture(PL.Box(50, 2000, PL.Vec2(B.x0 - 0.5 - 50, my)), bd);
-  terrain.createFixture(PL.Box(50, 2000, PL.Vec2(B.x1 + 0.5 + 50, my)), bd);
-  terrain.createFixture(PL.Box(2000, 50, PL.Vec2(mx, B.y0 - 0.5 - 50)), bd);
-  terrain.createFixture(PL.Box(2000, 50, PL.Vec2(mx, B.y1 + 0.5 + 50)), bd);
+  terrain.createFixture(PL.Box(50 - HITIN, 2000, PL.Vec2(B.x0 - 0.5 - 50, my)), bd);
+  terrain.createFixture(PL.Box(50 - HITIN, 2000, PL.Vec2(B.x1 + 0.5 + 50, my)), bd);
+  terrain.createFixture(PL.Box(2000, 50 - HITIN, PL.Vec2(mx, B.y0 - 0.5 - 50)), bd);
+  terrain.createFixture(PL.Box(2000, 50 - HITIN, PL.Vec2(mx, B.y1 + 0.5 + 50)), bd);
   world.on("begin-contact", onBegin);
   /* no post-solve listener: powder colliders are sensors, which never produce solved contacts */
 }
@@ -492,7 +493,7 @@ function rebuildFixtures(b){
   if (runs.length <= MAXFIX){
     runs.forEach(function(r){
       var P = physOf(r.e);
-      pb.createFixture(PL.Box(r.len/2, r.h/2, PL.Vec2(r.x0 + (r.len - 1)/2, r.y + (r.h - 1)/2)),
+      pb.createFixture(PL.Box(Math.max(0.08, r.len/2 - HITIN), Math.max(0.08, r.h/2 - HITIN), PL.Vec2(r.x0 + (r.len - 1)/2, r.y + (r.h - 1)/2)),
         { density: P.dens/1000, friction: P.fric, restitution: P.bounce, userData: { b: b } });
     });
   }
@@ -509,7 +510,7 @@ function rebuildFixtures(b){
     }
     blocks.forEach(function(q){
       var P = physOf(q.e);
-      pb.createFixture(PL.Box(s/2, s/2, PL.Vec2(q.bx*s + s/2, q.by*s + s/2)),
+      pb.createFixture(PL.Box(Math.max(0.08, s/2 - HITIN), Math.max(0.08, s/2 - HITIN), PL.Vec2(q.bx*s + s/2, q.by*s + s/2)),
         { density: P.dens/1000, friction: P.fric, restitution: P.bounce, userData: { b: b } });
     });
   }
@@ -934,7 +935,7 @@ function refreshTerrain(){
   want.forEach(function(r, key){
     if (tfix.has(key)) return;
     var len = r.x1 - r.x0 + 1;
-    tfix.set(key, terrain.createFixture(PL.Box(len/2, 0.5, PL.Vec2((r.x0 + r.x1)/2, r.y)),
+    tfix.set(key, terrain.createFixture(PL.Box(Math.max(0.08, len/2 - HITIN), 0.5 - HITIN, PL.Vec2((r.x0 + r.x1)/2, r.y)),
       { friction: r.kind === 2 ? 0.25 : 0.8, restitution: 0, isSensor: r.kind === 2, userData: { t: 1, kind: r.kind, y: r.y, x0: r.x0, x1: r.x1 } }));
   });
 }
